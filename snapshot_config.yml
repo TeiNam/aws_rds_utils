@@ -1,0 +1,16 @@
+aws:
+  default_profile: 'AdminRole-111111111111'
+  default_region: 'ap-northeast-2'
+
+snapshot:
+  default_retention_months: 3
+
+instances:
+  - identifier: 'dev-db'
+    type: 'aurora'
+    retention_months: 1
+
+  - identifier: 'prod-db'
+    type: 'aurora'
+    aws_profile: 'AdminRole-222222222222'
+    retention_months: 12

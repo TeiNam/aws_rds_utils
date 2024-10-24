@@ -1,0 +1,15 @@
+tasks:
+  rds_backup_daily:
+    module: rds_snapshot
+    function: process_instance
+    args: []
+    kwargs: {}
+    schedule:
+      type: weekly
+      at: 'Monday 04:00'
+    enabled: true
+    description: '매일 새벽 4시 RDS 백업'
+
+logging:
+  level: INFO
+  file: scheduler.log

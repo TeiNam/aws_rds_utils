@@ -4,28 +4,68 @@ import random
 import string
 import re
 import os
-import sys
 import time
+import yaml
 from datetime import datetime, timedelta
 from botocore.exceptions import ProfileNotFound, NoCredentialsError
 
-# AWS 설정
-AWS_PROFILE = ''  # AWS SSO 프로필 이름
-AWS_REGION = 'ap-northeast-2'  # AWS 리전
+
+def load_config(config_path='snapshot_config.yml'):
+    """설정 파일 로드"""
+    try:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {config_path}")
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        # 필수 설정 확인
+        if not all(key in config for key in ['aws', 'snapshot', 'instances']):
+            raise ValueError("설정 파일에 필수 설정이 누락되었습니다.")
+
+        # 기본값 설정
+        default_retention = config['snapshot'].get('default_retention_months', 3)
+        default_profile = config['aws'].get('default_profile', 'default')
+        default_region = config['aws'].get('default_region', 'ap-northeast-2')
+
+        # 각 인스턴스에 기본값 적용
+        for instance in config['instances']:
+            if 'retention_months' not in instance:
+                instance['retention_months'] = default_retention
+            if 'aws_profile' not in instance:
+                instance['aws_profile'] = default_profile
+            if 'aws_region' not in instance:
+                instance['aws_region'] = default_region
+
+        return config
+    except Exception as e:
+        print(f"설정 파일 로드 중 오류 발생: {str(e)}")
+        raise
+
+
+# 설정 로드
+config = load_config()
+
+# 전역 기본값 설정
+DEFAULT_PROFILE = config['aws']['default_profile']
+DEFAULT_REGION = config['aws']['default_region']
+DEFAULT_RETENTION_MONTHS = config['snapshot']['default_retention_months']
 
 # DB 인스턴스 설정
-DB_INSTANCES = [
-    {
-        'identifier': 'rds-instance-name',
-        'type': 'rds'  # rds 또는 aurora
-    },
-    # Aurora 클러스터 예시
-    {
-        'identifier': 'cluster-name',
-        'type': 'aurora'
-    }
-]
-SNAPSHOT_RETENTION_MONTHS = 3  # 스냅샷 보관 기간 (월)
+DB_INSTANCES = config['instances']
+
+# 설정 정보 출력
+print("설정 로드 완료:")
+print(f"- 기본 AWS 프로필: {DEFAULT_PROFILE}")
+print(f"- 기본 AWS 리전: {DEFAULT_REGION}")
+print(f"- 기본 스냅샷 보관 기간: {DEFAULT_RETENTION_MONTHS}개월")
+print("- DB 인스턴스:")
+for instance in DB_INSTANCES:
+    print(f"  - {instance['identifier']}:")
+    print(f"    유형: {instance['type']}")
+    print(f"    프로필: {instance['aws_profile']}")
+    print(f"    리전: {instance['aws_region']}")
+    print(f"    보관기간: {instance['retention_months']}개월")
 
 
 def check_sso_credentials(profile_name):
@@ -44,19 +84,19 @@ def check_sso_credentials(profile_name):
         return False
 
 
-def get_boto3_client():
+def get_boto3_client(profile_name, region_name):
     """환경에 따른 AWS 클라이언트 생성"""
     # EC2 환경인 경우
     if os.path.exists('/sys/hypervisor/uuid'):
-        return boto3.client('rds', region_name=AWS_REGION)
+        return boto3.client('rds', region_name=region_name)
 
     # 로컬 개발 환경인 경우
     else:
         # SSO 자격 증명 확인
-        if not check_sso_credentials(AWS_PROFILE):
+        if not check_sso_credentials(profile_name):
             raise NoCredentialsError("SSO 자격 증명이 유효하지 않습니다.")
 
-        session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
+        session = boto3.Session(profile_name=profile_name, region_name=region_name)
         return session.client('rds')
 
 
@@ -183,7 +223,7 @@ def create_snapshot(instance_identifier):
             elif status == 'failed':
                 raise Exception("스냅샷 생성 실패")
 
-            time.sleep(10)  # 10초마다 상태 확인
+            time.sleep(10)
 
         return response
 
@@ -313,17 +353,28 @@ def process_instance(instance):
     try:
         instance_id = instance['identifier']
         instance_type = instance['type']
+        retention_months = instance['retention_months']
+        aws_profile = instance['aws_profile']
+        aws_region = instance['aws_region']
 
         print(f"\n[{instance_id}] {instance_type.upper()} 인스턴스 처리 시작...")
+        print(f"AWS 프로필: {aws_profile}")
+        print(f"AWS 리전: {aws_region}")
+        print(f"스냅샷 보관 기간: {retention_months}개월")
+
+        # 인스턴스별 AWS 클라이언트 생성
+        rds = get_boto3_client(aws_profile, aws_region)
 
         if instance_type == 'aurora':
-            snapshot_response = create_aurora_snapshot(instance_id)
-            if snapshot_response is not None:
-                delete_old_aurora_snapshots(instance_id, SNAPSHOT_RETENTION_MONTHS)
+            if check_aurora_cluster_state(rds, instance_id) == 'available':
+                snapshot_response = create_aurora_snapshot(instance_id)
+                if snapshot_response is not None:
+                    delete_old_aurora_snapshots(instance_id, retention_months)
         else:  # rds
-            snapshot_response = create_snapshot(instance_id)
-            if snapshot_response is not None:
-                delete_old_snapshots(instance_id, SNAPSHOT_RETENTION_MONTHS)
+            if check_instance_state(rds, instance_id) == 'available':
+                snapshot_response = create_snapshot(instance_id)
+                if snapshot_response is not None:
+                    delete_old_snapshots(instance_id, retention_months)
 
         print(f"[{instance_id}] 인스턴스 처리 완료")
         return True
@@ -334,7 +385,7 @@ def process_instance(instance):
 
 
 def main():
-    print(f"처리할 인스턴스 목록:")
+    print(f"\n처리할 인스턴스 목록:")
     for instance in DB_INSTANCES:
         print(f"- {instance['identifier']} ({instance['type'].upper()})")
 
