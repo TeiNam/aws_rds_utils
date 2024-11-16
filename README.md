@@ -34,7 +34,7 @@
 ```yaml
 # AWS 기본 설정
 aws:
-  default_profile: 'AdministratorAccess'  # 기본 AWS SSO 프로필
+  default_profile: 'AdministratorAccess'               # 기본 AWS SSO 프로필
   default_region: 'ap-northeast-2'                     # 기본 AWS 리전
 
 # 스냅샷 기본 설정
