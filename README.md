@@ -34,7 +34,7 @@
 ```yaml
 # AWS 기본 설정
 aws:
-  default_profile: 'AdministratorAccess-637423179433'  # 기본 AWS SSO 프로필
+  default_profile: 'AdministratorAccess'  # 기본 AWS SSO 프로필
   default_region: 'ap-northeast-2'                     # 기본 AWS 리전
 
 # 스냅샷 기본 설정
@@ -57,7 +57,7 @@ instances:
   # Aurora 예제 2: 모든 설정 명시
   - identifier: 'prod-aurora-2'
     type: 'aurora'
-    aws_profile: 'AdministratorAccess-488659748805'  # 다른 AWS 프로필
+    aws_profile: 'AdministratorAccess-2'  # 다른 AWS 프로필
     aws_region: 'ap-northeast-1'     # 다른 리전
     retention_months: 12             # 12개월 보관
     description: '프로덕션 Aurora 클러스터'  # 설명 (선택사항)
@@ -78,7 +78,7 @@ instances:
   # 개발 환경 예제
   - identifier: 'dev-channel-admin-api'
     type: 'aurora'
-    aws_profile: 'AdministratorAccess-637423179433'
+    aws_profile: 'AdministratorAccess'
     aws_region: 'ap-northeast-2'
     retention_months: 1
     description: '개발 환경 채널 관리 API DB'
